@@ -12,40 +12,26 @@ Para facilitar a criação do **Project (quadro)**, **milestones** e **issues**,
 ### 1) Simular (dry-run)
 
 ```bash
-python scripts/bootstrap_github_project.py \
-  --owner <ORG_OU_USUARIO> \
-  --repo <NOME_REPO>
+python scripts/bootstrap_github_project.py --owner <ORG_OU_USUARIO> --repo <NOME_REPO>
 ```
 
 ### 2) Aplicar de fato no GitHub
 
 ```bash
 export GITHUB_TOKEN=<SEU_TOKEN>
-python scripts/bootstrap_github_project.py \
-  --owner <ORG_OU_USUARIO> \
-  --repo <NOME_REPO> \
-  --apply
+python scripts/bootstrap_github_project.py --owner <ORG_OU_USUARIO> --repo <NOME_REPO> --apply
 ```
 
 ### 3) Criar também um Project v2 e incluir as issues
 
 ```bash
 export GITHUB_TOKEN=<SEU_TOKEN>
-python scripts/bootstrap_github_project.py \
-  --owner <ORG_OU_USUARIO> \
-  --repo <NOME_REPO> \
-  --apply \
-  --create-project \
-  --project-title "Fábrica IA - Plano de Execução"
+python scripts/bootstrap_github_project.py --owner <ORG_OU_USUARIO> --repo <NOME_REPO> --apply --create-project --project-title "Fábrica IA - Plano de Execução"
 ```
 
 ### 4) Usar um Project v2 já existente
 
 ```bash
 export GITHUB_TOKEN=<SEU_TOKEN>
-python scripts/bootstrap_github_project.py \
-  --owner <ORG_OU_USUARIO> \
-  --repo <NOME_REPO> \
-  --apply \
-  --project-number <NUMERO_PROJECT>
+python scripts/bootstrap_github_project.py --owner <ORG_OU_USUARIO> --repo <NOME_REPO> --apply --project-number <NUMERO_PROJECT>
 ```
