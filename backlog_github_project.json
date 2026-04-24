@@ -1,0 +1,69 @@
+{
+  "labels": [
+    {"name": "fase:i", "color": "1D76DB", "description": "Fase I - Exploração"},
+    {"name": "fase:ii", "color": "5319E7", "description": "Fase II - Viabilidade e Concepção"},
+    {"name": "fase:iii", "color": "0E8A16", "description": "Fase III - MVP"},
+    {"name": "fase:iv", "color": "FBCA04", "description": "Fase IV - Piloto"},
+    {"name": "fase:v", "color": "D93F0B", "description": "Fase V - Escala"},
+    {"name": "tipo:epic", "color": "BFDADC", "description": "Issue épica"},
+    {"name": "tipo:atividade", "color": "C2E0C6", "description": "Atividade"},
+    {"name": "tipo:entregavel", "color": "F9D0C4", "description": "Entregável"},
+    {"name": "tipo:gate", "color": "E4E669", "description": "Gate de decisão"}
+  ],
+  "milestones": [
+    {"key": "M1", "title": "M1 - Exploração", "description": "Portfólio priorizado e problema selecionado."},
+    {"key": "M2", "title": "M2 - Viabilidade e Concepção", "description": "Viabilidade comprovada e caso de uso especificado."},
+    {"key": "M3", "title": "M3 - MVP", "description": "MVP funcional em homologação."},
+    {"key": "M4", "title": "M4 - Piloto Controlado", "description": "Validação de campo e recomendação para escala."},
+    {"key": "M5", "title": "M5 - Escala e Operação", "description": "Solução operacionalizada com transferência tecnológica."}
+  ],
+  "issues": [
+    {"title": "[Atividade] Levantar problemas e oportunidades com órgão demandante", "milestone": "M1", "labels": ["fase:i", "tipo:atividade"]},
+    {"title": "[Atividade] Avaliar impacto público e complexidade preliminar", "milestone": "M1", "labels": ["fase:i", "tipo:atividade"]},
+    {"title": "[Atividade] Priorizar portfólio com critérios acordados", "milestone": "M1", "labels": ["fase:i", "tipo:atividade"]},
+    {"title": "[Entregável] Documento de Portfólio de Problemas e Oportunidades de IA", "milestone": "M1", "labels": ["fase:i", "tipo:entregavel"]},
+    {"title": "[Atividade] Detalhar problema prioritário (objetivos, stakeholders, dados, riscos)", "milestone": "M1", "labels": ["fase:i", "tipo:atividade"]},
+    {"title": "[Entregável] Documento de Detalhamento do Problema Priorizado", "milestone": "M1", "labels": ["fase:i", "tipo:entregavel"]},
+    {"title": "[Gate] Validar critérios de saída da Fase I (M1)", "milestone": "M1", "labels": ["fase:i", "tipo:gate"]},
+
+    {"title": "[Atividade] Executar EDA e mapear qualidade/disponibilidade de dados", "milestone": "M2", "labels": ["fase:ii", "tipo:atividade"]},
+    {"title": "[Atividade] Avaliar viabilidade técnica, científica e operacional", "milestone": "M2", "labels": ["fase:ii", "tipo:atividade"]},
+    {"title": "[Atividade] Definir métricas técnicas e limiares mínimos de aceitação", "milestone": "M2", "labels": ["fase:ii", "tipo:atividade"]},
+    {"title": "[Atividade] Consolidar riscos e plano de mitigação", "milestone": "M2", "labels": ["fase:ii", "tipo:atividade"]},
+    {"title": "[Atividade] Especificar caso de uso de IA e requisitos (funcionais e não funcionais)", "milestone": "M2", "labels": ["fase:ii", "tipo:atividade"]},
+    {"title": "[Entregável] Documento de Viabilidade (técnica/científica/operacional)", "milestone": "M2", "labels": ["fase:ii", "tipo:entregavel"]},
+    {"title": "[Entregável] Relatório EDA", "milestone": "M2", "labels": ["fase:ii", "tipo:entregavel"]},
+    {"title": "[Entregável] Plano preliminar do MVP", "milestone": "M2", "labels": ["fase:ii", "tipo:entregavel"]},
+    {"title": "[Entregável] Documento de Especificação do Caso de Uso de IA", "milestone": "M2", "labels": ["fase:ii", "tipo:entregavel"]},
+    {"title": "[Gate] Aprovar avanço para MVP (M2)", "milestone": "M2", "labels": ["fase:ii", "tipo:gate"]},
+
+    {"title": "[Atividade] Implementar pipeline de dados versionado", "milestone": "M3", "labels": ["fase:iii", "tipo:atividade"]},
+    {"title": "[Atividade] Treinar e versionar modelo MVP", "milestone": "M3", "labels": ["fase:iii", "tipo:atividade"]},
+    {"title": "[Atividade] Implementar avaliação offline e baseline comparativa", "milestone": "M3", "labels": ["fase:iii", "tipo:atividade"]},
+    {"title": "[Atividade] Configurar CI/CD do repositório", "milestone": "M3", "labels": ["fase:iii", "tipo:atividade"]},
+    {"title": "[Atividade] Implementar protótipo funcional (API/serviço/aplicação)", "milestone": "M3", "labels": ["fase:iii", "tipo:atividade"]},
+    {"title": "[Entregável] Repositório com CI/CD e documentação técnica", "milestone": "M3", "labels": ["fase:iii", "tipo:entregavel"]},
+    {"title": "[Entregável] Pipeline + dataset preparado e documentado", "milestone": "M3", "labels": ["fase:iii", "tipo:entregavel"]},
+    {"title": "[Entregável] Modelo MVP + relatório de avaliação offline", "milestone": "M3", "labels": ["fase:iii", "tipo:entregavel"]},
+    {"title": "[Entregável] MVP em homologação", "milestone": "M3", "labels": ["fase:iii", "tipo:entregavel"]},
+    {"title": "[Gate] Validar saída da Fase III (M3)", "milestone": "M3", "labels": ["fase:iii", "tipo:gate"]},
+
+    {"title": "[Atividade] Implantar MVP em ambiente piloto controlado", "milestone": "M4", "labels": ["fase:iv", "tipo:atividade"]},
+    {"title": "[Atividade] Monitorar KPIs técnicos e de negócio no piloto", "milestone": "M4", "labels": ["fase:iv", "tipo:atividade"]},
+    {"title": "[Atividade] Coletar feedback de usuários e curar Golden Set", "milestone": "M4", "labels": ["fase:iv", "tipo:atividade"]},
+    {"title": "[Atividade] Avaliar salvaguardas éticas e conformidade operacional", "milestone": "M4", "labels": ["fase:iv", "tipo:atividade"]},
+    {"title": "[Entregável] Relatório de Validação de Campo", "milestone": "M4", "labels": ["fase:iv", "tipo:entregavel"]},
+    {"title": "[Entregável] Golden Set do Piloto", "milestone": "M4", "labels": ["fase:iv", "tipo:entregavel"]},
+    {"title": "[Entregável] Parecer de Ajuste Ético", "milestone": "M4", "labels": ["fase:iv", "tipo:entregavel"]},
+    {"title": "[Gate] Recomendação formal para escala (M4)", "milestone": "M4", "labels": ["fase:iv", "tipo:gate"]},
+
+    {"title": "[Atividade] Preparar release package de produção", "milestone": "M5", "labels": ["fase:v", "tipo:atividade"]},
+    {"title": "[Atividade] Executar transferência tecnológica para órgão demandante", "milestone": "M5", "labels": ["fase:v", "tipo:atividade"]},
+    {"title": "[Atividade] Definir e operacionalizar matriz de monitoramento/observabilidade", "milestone": "M5", "labels": ["fase:v", "tipo:atividade"]},
+    {"title": "[Atividade] Formalizar governança, papéis e responsabilidades", "milestone": "M5", "labels": ["fase:v", "tipo:atividade"]},
+    {"title": "[Entregável] Release package validado", "milestone": "M5", "labels": ["fase:v", "tipo:entregavel"]},
+    {"title": "[Entregável] Kit de Transferência Tecnológica", "milestone": "M5", "labels": ["fase:v", "tipo:entregavel"]},
+    {"title": "[Entregável] Termo de Transferência de Tecnologia assinado", "milestone": "M5", "labels": ["fase:v", "tipo:entregavel"]},
+    {"title": "[Gate] Encerramento formal do projeto (M5)", "milestone": "M5", "labels": ["fase:v", "tipo:gate"]}
+  ]
+}
