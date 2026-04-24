@@ -157,7 +157,7 @@ def ensure_issues(owner: str, repo: str, token: str, cfg: dict[str, Any], milest
 def create_project(owner: str, token: str, title: str) -> str:
     query_owner = """
     query($login: String!) {
-      organization(login: $login) { id }
+    #   organization(login: $login) { id }
       user(login: $login) { id }
     }
     """
