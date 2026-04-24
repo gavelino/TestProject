@@ -1,4 +1,8 @@
 {
+  "schedule": {
+    "project_start_date": null,
+    "default_issue_duration_days": 1
+  },
   "labels": [
     {"name": "fase:i", "color": "1D76DB", "description": "Fase I - Exploração"},
     {"name": "fase:ii", "color": "5319E7", "description": "Fase II - Viabilidade e Concepção"},

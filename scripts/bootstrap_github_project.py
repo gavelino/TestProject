@@ -4,13 +4,17 @@
 Uso (dry-run):
   python scripts/bootstrap_github_project.py --owner ORG --repo REPO
 
+Com cronograma estimado:
+  python scripts/bootstrap_github_project.py --owner ORG --repo REPO --project-start-date 2026-05-01
+
 Aplicar de fato:
-  GITHUB_TOKEN=... python scripts/bootstrap_github_project.py --owner ORG --repo REPO --apply --create-project --project-title "Fábrica IA"
+  GITHUB_TOKEN=... python scripts/bootstrap_github_project.py --owner ORG --repo REPO --apply
 """
 
 from __future__ import annotations
 
 import argparse
+from datetime import date, datetime, timedelta
 import json
 import os
 import sys
@@ -22,11 +26,77 @@ from typing import Any
 
 API = "https://api.github.com"
 GRAPHQL = "https://api.github.com/graphql"
+DATE_FORMAT = "%Y-%m-%d"
 
 
 def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def parse_date(value: str) -> date:
+    try:
+        return datetime.strptime(value, DATE_FORMAT).date()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Data invalida '{value}'. Use AAAA-MM-DD.") from exc
+
+
+def add_days(start: date, days: int) -> date:
+    if days < 1:
+        raise ValueError("A duracao estimada deve ser maior ou igual a 1 dia")
+    return start + timedelta(days=days - 1)
+
+
+def iso_date(value: date) -> str:
+    return value.strftime(DATE_FORMAT)
+
+
+def schedule_issues(cfg: dict[str, Any], project_start_date: date | None) -> dict[str, dict[str, Any]]:
+    """Calcula datas sequenciais e alinha o fim das issues ao fim do milestone."""
+    if project_start_date is None:
+        return {}
+
+    default_duration = int(cfg.get("schedule", {}).get("default_issue_duration_days", 1))
+    current_start = project_start_date
+    issue_order: list[str] = []
+    raw_schedule: dict[str, dict[str, Any]] = {}
+    due_dates: dict[str, date] = {}
+
+    for index, issue in enumerate(cfg["issues"], start=1):
+        duration = int(issue.get("estimated_days", default_duration))
+        finish = add_days(current_start, duration)
+        issue_order.append(issue["title"])
+        raw_schedule[issue["title"]] = {
+            "sequence": index,
+            "duration_days": duration,
+            "start_date": current_start,
+            "activity_end_date": finish,
+            "milestone": issue["milestone"],
+        }
+        milestone = issue["milestone"]
+        if milestone not in due_dates or finish > due_dates[milestone]:
+            due_dates[milestone] = finish
+        current_start = finish + timedelta(days=1)
+
+    schedule: dict[str, dict[str, Any]] = {}
+    for title in issue_order:
+        item = raw_schedule[title]
+        schedule[title] = {
+            **item,
+            "end_date": due_dates[item["milestone"]],
+        }
+
+    return schedule
+
+
+def milestone_due_dates(issue_schedule: dict[str, dict[str, Any]]) -> dict[str, date]:
+    out: dict[str, date] = {}
+    for item in issue_schedule.values():
+        milestone = item["milestone"]
+        end_date = item["end_date"]
+        if milestone not in out or end_date > out[milestone]:
+            out[milestone] = end_date
+    return out
 
 
 def request_json(method: str, url: str, token: str, payload: dict[str, Any] | None = None) -> Any:
@@ -56,10 +126,19 @@ def graphql(token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]
     return data["data"]
 
 
-def ensure_milestones(owner: str, repo: str, token: str, cfg: dict[str, Any], apply: bool) -> dict[str, int]:
+def ensure_milestones(
+    owner: str,
+    repo: str,
+    token: str,
+    cfg: dict[str, Any],
+    apply: bool,
+    due_dates: dict[str, date],
+) -> dict[str, int]:
     url = f"{API}/repos/{owner}/{repo}/milestones?state=all&per_page=100"
     if not apply:
         print(f"[DRY-RUN] Consultaria milestones: {url}")
+        for milestone, due_on in due_dates.items():
+            print(f"[DRY-RUN] Milestone {milestone} teria data alvo {iso_date(due_on)}")
         return {}
 
     current = request_json("GET", url, token)
@@ -67,19 +146,32 @@ def ensure_milestones(owner: str, repo: str, token: str, cfg: dict[str, Any], ap
     out: dict[str, int] = {}
 
     for m in cfg["milestones"]:
+        due_on = due_dates.get(m["key"])
         if m["title"] in by_title:
             out[m["key"]] = by_title[m["title"]]
-            print(f"[OK] Milestone já existe: {m['title']} (#{by_title[m['title']]})")
+            print(f"[OK] Milestone ja existe: {m['title']} (#{by_title[m['title']]})")
+            if due_on:
+                request_json(
+                    "PATCH",
+                    f"{API}/repos/{owner}/{repo}/milestones/{by_title[m['title']]}",
+                    token,
+                    {"due_on": f"{iso_date(due_on)}T23:59:59Z"},
+                )
+                print(f"[OK] Data alvo atualizada: {m['title']} -> {iso_date(due_on)}")
             continue
 
+        payload = {"title": m["title"], "description": m["description"]}
+        if due_on:
+            payload["due_on"] = f"{iso_date(due_on)}T23:59:59Z"
         created = request_json(
             "POST",
             f"{API}/repos/{owner}/{repo}/milestones",
             token,
-            {"title": m["title"], "description": m["description"]},
+            payload,
         )
         out[m["key"]] = created["number"]
-        print(f"[NEW] Milestone criada: {m['title']} (#{created['number']})")
+        suffix = f" - vence em {iso_date(due_on)}" if due_on else ""
+        print(f"[NEW] Milestone criada: {m['title']} (#{created['number']}){suffix}")
 
     return out
 
@@ -95,7 +187,7 @@ def ensure_labels(owner: str, repo: str, token: str, cfg: dict[str, Any], apply:
 
     for label in cfg["labels"]:
         if label["name"] in existing:
-            print(f"[OK] Label já existe: {label['name']}")
+            print(f"[OK] Label ja existe: {label['name']}")
             continue
         request_json(
             "POST",
@@ -110,25 +202,54 @@ def ensure_labels(owner: str, repo: str, token: str, cfg: dict[str, Any], apply:
         print(f"[NEW] Label criada: {label['name']}")
 
 
-def issue_body(issue: dict[str, Any]) -> str:
+def issue_body(issue: dict[str, Any], schedule: dict[str, Any] | None = None) -> str:
+    schedule_block = ""
+    if schedule:
+        plural = "dia" if schedule["duration_days"] == 1 else "dias"
+        schedule_block = (
+            "\n## Planejamento\n"
+            f"- Sequencia: {schedule['sequence']}\n"
+            f"- Inicio estimado: {iso_date(schedule['start_date'])}\n"
+            f"- Fim estimado: {iso_date(schedule['end_date'])}\n"
+            f"- Duracao estimada: {schedule['duration_days']} {plural}\n"
+        )
+
     return (
         "## Contexto\n"
         f"Fase/marco: **{issue['milestone']}**.\n\n"
         "## Objetivo\n"
-        "Executar esta atividade conforme o processo da Fábrica de IA.\n\n"
-        "## Entregáveis\n"
-        "- [ ] Evidência principal anexada\n"
-        "- [ ] Critérios de aceite validados\n\n"
-        "## Critérios de aceite\n"
+        "Executar esta atividade conforme o processo da Fabrica de IA.\n\n"
+        "## Entregaveis\n"
+        "- [ ] Evidencia principal anexada\n"
+        "- [ ] Criterios de aceite validados\n\n"
+        "## Criterios de aceite\n"
         "- [ ] Resultado revisado com stakeholders\n"
         "- [ ] Registro no Project atualizado\n"
+        f"{schedule_block}"
     )
 
 
-def ensure_issues(owner: str, repo: str, token: str, cfg: dict[str, Any], milestones: dict[str, int], apply: bool) -> list[str]:
+def ensure_issues(
+    owner: str,
+    repo: str,
+    token: str,
+    cfg: dict[str, Any],
+    milestones: dict[str, int],
+    apply: bool,
+    issue_schedule: dict[str, dict[str, Any]],
+) -> list[str]:
     titles = [i["title"] for i in cfg["issues"]]
     if not apply:
         print(f"[DRY-RUN] Criaria {len(titles)} issues")
+        for item in cfg["issues"]:
+            schedule = issue_schedule.get(item["title"])
+            if schedule:
+                print(
+                    "[DRY-RUN] "
+                    f"{item['title']}: {iso_date(schedule['start_date'])} "
+                    f"-> {iso_date(schedule['end_date'])} "
+                    f"({schedule['duration_days']} dia(s))"
+                )
         return titles
 
     current = request_json("GET", f"{API}/repos/{owner}/{repo}/issues?state=all&per_page=100", token)
@@ -137,13 +258,13 @@ def ensure_issues(owner: str, repo: str, token: str, cfg: dict[str, Any], milest
     created_titles: list[str] = []
     for item in cfg["issues"]:
         if item["title"] in existing:
-            print(f"[OK] Issue já existe: {item['title']}")
+            print(f"[OK] Issue ja existe: {item['title']}")
             created_titles.append(item["title"])
             continue
 
         payload = {
             "title": item["title"],
-            "body": issue_body(item),
+            "body": issue_body(item, issue_schedule.get(item["title"])),
             "labels": item["labels"],
             "milestone": milestones[item["milestone"]],
         }
@@ -166,7 +287,7 @@ def create_project(owner: str, token: str, title: str) -> str:
     if owner_id is None:
         owner_id = data.get("user", {}).get("id") if data.get("user") else None
     if owner_id is None:
-        raise RuntimeError(f"Não foi possível resolver owner '{owner}' como organização ou usuário")
+        raise RuntimeError(f"Nao foi possivel resolver owner '{owner}' como organizacao ou usuario")
 
     mutation = """
     mutation($ownerId: ID!, $title: String!) {
@@ -193,7 +314,7 @@ def get_project_id(owner: str, token: str, project_number: int) -> str:
     usr_p = data.get("user", {}).get("projectV2") if data.get("user") else None
     project = org_p or usr_p
     if not project:
-        raise RuntimeError(f"Project number {project_number} não encontrado em {owner}")
+        raise RuntimeError(f"Project number {project_number} nao encontrado em {owner}")
     print(f"[OK] Project encontrado: {project['title']}")
     return project["id"]
 
@@ -217,7 +338,7 @@ def add_issues_to_project(owner: str, repo: str, token: str, project_id: str, ti
     for title in titles:
         issue = by_title.get(title)
         if not issue:
-            print(f"[WARN] Issue não encontrada para adicionar no project: {title}")
+            print(f"[WARN] Issue nao encontrada para adicionar no project: {title}")
             continue
         graphql(token, mutation, {"projectId": project_id, "contentId": issue["node_id"]})
         print(f"[OK] Issue adicionada ao project: {title}")
@@ -225,13 +346,18 @@ def add_issues_to_project(owner: str, repo: str, token: str, project_id: str, ti
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bootstrap de milestones/issues/project no GitHub")
-    parser.add_argument("--owner", required=True, help="Owner da organização ou usuário")
-    parser.add_argument("--repo", required=True, help="Nome do repositório")
-    parser.add_argument("--config", default="backlog_github_project.json", help="Arquivo JSON de configuração")
-    parser.add_argument("--apply", action="store_true", help="Executa alterações no GitHub")
+    parser.add_argument("--owner", required=True, help="Owner da organizacao ou usuario")
+    parser.add_argument("--repo", required=True, help="Nome do repositorio")
+    parser.add_argument("--config", default="backlog_github_project.json", help="Arquivo JSON de configuracao")
+    parser.add_argument("--apply", action="store_true", help="Executa alteracoes no GitHub")
     parser.add_argument("--create-project", action="store_true", help="Cria novo Project v2")
-    parser.add_argument("--project-title", default="Fábrica IA - Plano de Execução", help="Título do novo project")
-    parser.add_argument("--project-number", type=int, help="Número de Project v2 existente")
+    parser.add_argument("--project-title", default="Fabrica IA - Plano de Execucao", help="Titulo do novo project")
+    parser.add_argument("--project-number", type=int, help="Numero de Project v2 existente")
+    parser.add_argument(
+        "--project-start-date",
+        type=parse_date,
+        help="Data estimada de inicio do projeto no formato AAAA-MM-DD. Habilita calculo de prazos.",
+    )
     return parser.parse_args()
 
 
@@ -239,14 +365,20 @@ def main() -> int:
     args = parse_args()
     cfg = load_config(Path(args.config))
 
+    project_start_date = args.project_start_date
+    if project_start_date is None and cfg.get("schedule", {}).get("project_start_date"):
+        project_start_date = parse_date(cfg["schedule"]["project_start_date"])
+    issue_schedule = schedule_issues(cfg, project_start_date)
+    due_dates = milestone_due_dates(issue_schedule)
+
     token = os.getenv("GITHUB_TOKEN", "")
     if args.apply and not token:
         print("ERRO: defina GITHUB_TOKEN para executar com --apply", file=sys.stderr)
         return 2
 
-    milestones = ensure_milestones(args.owner, args.repo, token, cfg, args.apply)
+    milestones = ensure_milestones(args.owner, args.repo, token, cfg, args.apply, due_dates)
     ensure_labels(args.owner, args.repo, token, cfg, args.apply)
-    titles = ensure_issues(args.owner, args.repo, token, cfg, milestones, args.apply)
+    titles = ensure_issues(args.owner, args.repo, token, cfg, milestones, args.apply, issue_schedule)
 
     if args.create_project or args.project_number:
         if not args.apply:
@@ -258,7 +390,7 @@ def main() -> int:
                 project_id = get_project_id(args.owner, token, args.project_number)
             add_issues_to_project(args.owner, args.repo, token, project_id, titles, args.apply)
 
-    print("Concluído.")
+    print("Concluido.")
     return 0
 
 
