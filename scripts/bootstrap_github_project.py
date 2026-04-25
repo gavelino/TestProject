@@ -29,11 +29,40 @@ from typing import Any
 API = "https://api.github.com"
 GRAPHQL = "https://api.github.com/graphql"
 DATE_FORMAT = "%Y-%m-%d"
+VALID_DURATION_UNITS = {"days", "months"}
 
 
 def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def require_mapping(value: Any, name: str, errors: list[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        errors.append(f"`{name}` deve ser um objeto")
+        return {}
+    return value
+
+
+def require_list(value: Any, name: str, errors: list[str]) -> list[Any]:
+    if not isinstance(value, list):
+        errors.append(f"`{name}` deve ser uma lista")
+        return []
+    return value
+
+
+def duplicate_values(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return sorted(duplicates)
+
+
+def format_validation_errors(errors: list[str]) -> str:
+    return "Validacao falhou:\n" + "\n".join(f"- {error}" for error in errors)
 
 
 def parse_date(value: str) -> date:
@@ -72,6 +101,119 @@ def add_duration(start: date, duration: dict[str, Any]) -> date:
 
 def iso_date(value: date) -> str:
     return value.strftime(DATE_FORMAT)
+
+
+def validate_config(cfg: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    schedule = require_mapping(cfg.get("schedule"), "schedule", errors)
+    milestones = require_list(cfg.get("milestones"), "milestones", errors)
+    labels = require_list(cfg.get("labels"), "labels", errors)
+    issues = require_list(cfg.get("issues"), "issues", errors)
+
+    if schedule.get("project_start_date"):
+        try:
+            parse_date(str(schedule["project_start_date"]))
+        except argparse.ArgumentTypeError as exc:
+            errors.append(f"`schedule.project_start_date`: {exc}")
+
+    date_fields = schedule.get("project_date_fields", {})
+    if date_fields:
+        date_fields = require_mapping(date_fields, "schedule.project_date_fields", errors)
+        for key in ("start", "end"):
+            value = date_fields.get(key)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"`schedule.project_date_fields.{key}` deve ser um texto nao vazio")
+
+    milestone_keys: list[str] = []
+    milestone_titles: list[str] = []
+    for index, milestone in enumerate(milestones, start=1):
+        if not isinstance(milestone, dict):
+            errors.append(f"`milestones[{index}]` deve ser um objeto")
+            continue
+        key = milestone.get("key")
+        title = milestone.get("title")
+        if not isinstance(key, str) or not key.strip():
+            errors.append(f"`milestones[{index}].key` deve ser um texto nao vazio")
+        else:
+            milestone_keys.append(key)
+        if not isinstance(title, str) or not title.strip():
+            errors.append(f"`milestones[{index}].title` deve ser um texto nao vazio")
+        else:
+            milestone_titles.append(title)
+
+    for key in duplicate_values(milestone_keys):
+        errors.append(f"Milestone duplicado: {key}")
+    for title in duplicate_values(milestone_titles):
+        errors.append(f"Titulo de milestone duplicado: {title}")
+
+    durations = schedule.get("milestone_durations", {})
+    durations = require_mapping(durations, "schedule.milestone_durations", errors)
+    milestone_key_set = set(milestone_keys)
+    for key in milestone_keys:
+        duration = durations.get(key)
+        if not isinstance(duration, dict):
+            errors.append(f"Duracao nao configurada para o milestone {key}")
+            continue
+        value = duration.get("value")
+        unit = duration.get("unit")
+        if not isinstance(value, int) or value < 1:
+            errors.append(f"`schedule.milestone_durations.{key}.value` deve ser inteiro >= 1")
+        if unit not in VALID_DURATION_UNITS:
+            errors.append(
+                f"`schedule.milestone_durations.{key}.unit` deve ser um de: "
+                f"{', '.join(sorted(VALID_DURATION_UNITS))}"
+            )
+    for key in sorted(set(durations) - milestone_key_set):
+        errors.append(f"Duracao configurada para milestone inexistente: {key}")
+
+    label_names: list[str] = []
+    for index, label in enumerate(labels, start=1):
+        if not isinstance(label, dict):
+            errors.append(f"`labels[{index}]` deve ser um objeto")
+            continue
+        name = label.get("name")
+        color = label.get("color")
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"`labels[{index}].name` deve ser um texto nao vazio")
+        else:
+            label_names.append(name)
+        if not isinstance(color, str) or len(color) != 6:
+            errors.append(f"`labels[{index}].color` deve ter 6 caracteres hexadecimais")
+        else:
+            try:
+                int(color, 16)
+            except ValueError:
+                errors.append(f"`labels[{index}].color` deve ser hexadecimal")
+
+    for name in duplicate_values(label_names):
+        errors.append(f"Label duplicada: {name}")
+
+    label_name_set = set(label_names)
+    issue_titles: list[str] = []
+    for index, issue in enumerate(issues, start=1):
+        if not isinstance(issue, dict):
+            errors.append(f"`issues[{index}]` deve ser um objeto")
+            continue
+        title = issue.get("title")
+        milestone = issue.get("milestone")
+        issue_labels = issue.get("labels", [])
+        if not isinstance(title, str) or not title.strip():
+            errors.append(f"`issues[{index}].title` deve ser um texto nao vazio")
+        else:
+            issue_titles.append(title)
+        if milestone not in milestone_key_set:
+            errors.append(f"`issues[{index}]` referencia milestone inexistente: {milestone}")
+        if not isinstance(issue_labels, list):
+            errors.append(f"`issues[{index}].labels` deve ser uma lista")
+            continue
+        for label_name in issue_labels:
+            if label_name not in label_name_set:
+                errors.append(f"`issues[{index}]` referencia label inexistente: {label_name}")
+
+    for title in duplicate_values(issue_titles):
+        errors.append(f"Issue duplicada: {title}")
+
+    return errors
 
 
 def milestone_windows(cfg: dict[str, Any], project_start_date: date | None) -> dict[str, dict[str, Any]]:
@@ -356,6 +498,33 @@ def get_owner_type(owner: str, token: str) -> str:
     return owner_type
 
 
+def validate_remote_access(args: argparse.Namespace, token: str) -> list[str]:
+    errors: list[str] = []
+    try:
+        owner_type = get_owner_type(args.owner, token)
+        print(f"[OK] Owner encontrado: {args.owner} ({owner_type})")
+    except Exception as exc:
+        errors.append(f"Owner/token invalido: {exc}")
+        return errors
+
+    try:
+        request_json("GET", f"{API}/repos/{args.owner}/{args.repo}", token)
+        print(f"[OK] Repositorio acessivel: {args.owner}/{args.repo}")
+    except Exception as exc:
+        errors.append(f"Repositorio/token invalido: {exc}")
+
+    if args.create_project and args.project_number:
+        errors.append("Use apenas um: --create-project ou --project-number")
+
+    if args.project_number:
+        try:
+            get_project_id(args.owner, token, args.project_number)
+        except Exception as exc:
+            errors.append(f"Project existente invalido: {exc}")
+
+    return errors
+
+
 def get_project_owner_id(owner: str, token: str) -> str:
     owner_type = get_owner_type(owner, token)
     root_field = "organization" if owner_type == "Organization" else "user"
@@ -633,6 +802,10 @@ def main() -> int:
     args = parse_args()
     cfg = load_config(Path(args.config))
 
+    validation_errors = validate_config(cfg)
+    if validation_errors:
+        raise RuntimeError(format_validation_errors(validation_errors))
+
     project_start_date = args.project_start_date
     if project_start_date is None and cfg.get("schedule", {}).get("project_start_date"):
         project_start_date = parse_date(cfg["schedule"]["project_start_date"])
@@ -643,6 +816,10 @@ def main() -> int:
     if args.apply and not token:
         print("ERRO: defina GITHUB_TOKEN para executar com --apply", file=sys.stderr)
         return 2
+    if args.apply:
+        remote_errors = validate_remote_access(args, token)
+        if remote_errors:
+            raise RuntimeError(format_validation_errors(remote_errors))
 
     milestones = ensure_milestones(args.owner, args.repo, token, cfg, args.apply, due_dates)
     ensure_labels(args.owner, args.repo, token, cfg, args.apply)
