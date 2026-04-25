@@ -1,25 +1,26 @@
-# TestProject
+# RoadmapBuilder
 
-Projeto em construção.
+Gera milestones, issues e roadmap executável no GitHub para o plano de execução do processo da Fábrica.
 
 ## Automação para criar quadro, milestones e issues no GitHub
 
 Para facilitar a criação do **Project (quadro)**, **milestones** e **issues**, este repositório inclui:
 
 - `backlog_github_project.json`: backlog e estrutura de labels/marcos.
-- `scripts/bootstrap_github_project.py`: automação para provisionar no GitHub.
+- `scripts/roadmap_builder.py`: automação principal para provisionar no GitHub.
+- `scripts/bootstrap_github_project.py`: wrapper de compatibilidade para comandos antigos.
 
 ### 1) Simular (dry-run)
 
 ```bash
-python3 scripts/bootstrap_github_project.py --owner <OWNER_REPO> --repo <NOME_REPO>
+python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO>
 ```
 
 ### 2) Aplicar de fato no GitHub
 
 ```bash
 export GITHUB_TOKEN=<SEU_TOKEN>
-python3 scripts/bootstrap_github_project.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply
+python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply
 ```
 
 ### Definir cronograma estimado
@@ -27,7 +28,7 @@ python3 scripts/bootstrap_github_project.py --owner <OWNER_REPO> --repo <NOME_RE
 Informe a data prevista de início do projeto para o script calcular as datas em sequência:
 
 ```bash
-python3 scripts/bootstrap_github_project.py --owner <OWNER_REPO> --repo <NOME_REPO> --project-start-date 2026-05-01
+python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO> --project-start-date 2026-05-01
 ```
 
 Ao usar `--apply`, o script:
@@ -72,7 +73,7 @@ Com essa configuração, todas as issues de um milestone recebem a mesma janela 
 
 ```bash
 export GITHUB_TOKEN=<SEU_TOKEN>
-python3 scripts/bootstrap_github_project.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply --create-project --project-title "Fábrica IA - Plano de Execução"
+python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply --create-project --project-title "RoadmapBuilder"
 ```
 
 O GitHub Projects v2 exige que o Project seja criado sob um owner (`User` ou `Organization`). Depois de criar o Project, o script o vincula ao repositório com `linkProjectV2ToRepository`, para que ele fique associado ao repo em vez de ficar solto apenas na conta do usuário.
@@ -81,7 +82,7 @@ O GitHub Projects v2 exige que o Project seja criado sob um owner (`User` ou `Or
 
 ```bash
 export GITHUB_TOKEN=<SEU_TOKEN>
-python3 scripts/bootstrap_github_project.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply --project-number <NUMERO_PROJECT>
+python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply --project-number <NUMERO_PROJECT>
 ```
 
 ### Permissões necessárias do token (`GITHUB_TOKEN`)
