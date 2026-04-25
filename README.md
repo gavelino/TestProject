@@ -32,30 +32,41 @@ python3 scripts/bootstrap_github_project.py --owner <OWNER_REPO> --repo <NOME_RE
 
 Ao usar `--apply`, o script:
 
-- preenche a data alvo (`due_on`) dos milestones com base na última issue de cada marco;
-- inclui no corpo de cada issue a sequência, início estimado, fim estimado e duração estimada;
-- usa a mesma data de fim estimada para todas as issues associadas ao mesmo milestone: a data final do próprio milestone.
+- calcula janelas sequenciais para os milestones, na ordem definida em `milestones`;
+- preenche a data alvo (`due_on`) de cada milestone com a data final calculada;
+- inclui no corpo de cada issue a data prevista de início e fim conforme o milestone;
+- ao usar Project v2, cria/usa campos de data e preenche as datas dos itens para visualização no Roadmap.
 
-As durações podem ser configuradas no `backlog_github_project.json`:
+As durações dos milestones e os campos usados no Project podem ser configurados no `backlog_github_project.json`:
 
 ```json
 {
   "schedule": {
     "project_start_date": "2026-05-01",
-    "default_issue_duration_days": 1
-  },
-  "issues": [
-    {
-      "title": "[Atividade] Exemplo",
-      "milestone": "M1",
-      "labels": ["fase:i", "tipo:atividade"],
-      "estimated_days": 3
+    "project_date_fields": {
+      "start": "Início previsto",
+      "end": "Fim previsto"
+    },
+    "milestone_durations": {
+      "M1": {"value": 15, "unit": "days"},
+      "M2": {"value": 1, "unit": "months"},
+      "M3": {"value": 3, "unit": "months"},
+      "M4": {"value": 1, "unit": "months"},
+      "M5": {"value": 15, "unit": "days"}
     }
+  },
+  "milestones": [
+    {"key": "M1", "title": "M1 - Exploração"},
+    {"key": "M2", "title": "M2 - Viabilidade e Concepção"}
   ]
 }
 ```
 
-Se `estimated_days` não for informado em uma issue, o script usa `default_issue_duration_days`.
+Com essa configuração, todas as issues de um milestone recebem a mesma janela prevista:
+
+- issues de `M1`: início na data inicial do projeto e fim no prazo calculado para `M1`;
+- issues de `M2`: início no dia seguinte ao fim de `M1` e fim após a duração prevista de `M2`;
+- e assim sucessivamente até `M5`.
 
 ### 3) Criar também um Project v2 vinculado ao repositório
 

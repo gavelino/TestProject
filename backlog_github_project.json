@@ -1,7 +1,17 @@
 {
   "schedule": {
     "project_start_date": null,
-    "default_issue_duration_days": 1
+    "project_date_fields": {
+      "start": "Início previsto",
+      "end": "Fim previsto"
+    },
+    "milestone_durations": {
+      "M1": {"value": 15, "unit": "days"},
+      "M2": {"value": 1, "unit": "months"},
+      "M3": {"value": 3, "unit": "months"},
+      "M4": {"value": 1, "unit": "months"},
+      "M5": {"value": 15, "unit": "days"}
+    }
   },
   "labels": [
     {"name": "fase:i", "color": "1D76DB", "description": "Fase I - Exploração"},

@@ -14,9 +14,11 @@ Aplicar de fato:
 from __future__ import annotations
 
 import argparse
+import calendar
 from datetime import date, datetime, timedelta
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -47,43 +49,77 @@ def add_days(start: date, days: int) -> date:
     return start + timedelta(days=days - 1)
 
 
+def add_months(start: date, months: int) -> date:
+    if months < 1:
+        raise ValueError("A duracao estimada deve ser maior ou igual a 1 mes")
+
+    month_index = start.month - 1 + months
+    year = start.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(start.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def add_duration(start: date, duration: dict[str, Any]) -> date:
+    value = int(duration["value"])
+    unit = duration["unit"]
+    if unit == "days":
+        return add_days(start, value)
+    if unit == "months":
+        return add_months(start, value) - timedelta(days=1)
+    raise ValueError(f"Unidade de duracao invalida: {unit}")
+
+
 def iso_date(value: date) -> str:
     return value.strftime(DATE_FORMAT)
 
 
-def schedule_issues(cfg: dict[str, Any], project_start_date: date | None) -> dict[str, dict[str, Any]]:
-    """Calcula datas sequenciais e alinha o fim das issues ao fim do milestone."""
+def milestone_windows(cfg: dict[str, Any], project_start_date: date | None) -> dict[str, dict[str, Any]]:
+    """Calcula a janela sequencial de cada milestone."""
     if project_start_date is None:
         return {}
 
-    default_duration = int(cfg.get("schedule", {}).get("default_issue_duration_days", 1))
+    durations = cfg.get("schedule", {}).get("milestone_durations", {})
     current_start = project_start_date
-    issue_order: list[str] = []
-    raw_schedule: dict[str, dict[str, Any]] = {}
-    due_dates: dict[str, date] = {}
+    windows: dict[str, dict[str, Any]] = {}
+
+    for sequence, milestone in enumerate(cfg["milestones"], start=1):
+        key = milestone["key"]
+        duration = durations.get(key)
+        if duration is None:
+            raise ValueError(f"Duracao nao configurada para o milestone {key}")
+
+        end_date = add_duration(current_start, duration)
+        windows[key] = {
+            "sequence": sequence,
+            "start_date": current_start,
+            "end_date": end_date,
+            "duration": duration,
+        }
+        current_start = end_date + timedelta(days=1)
+
+    return windows
+
+
+def schedule_issues(cfg: dict[str, Any], project_start_date: date | None) -> dict[str, dict[str, Any]]:
+    """Alinha todas as issues a janela prevista do milestone correspondente."""
+    if project_start_date is None:
+        return {}
+
+    windows = milestone_windows(cfg, project_start_date)
+    schedule: dict[str, dict[str, Any]] = {}
 
     for index, issue in enumerate(cfg["issues"], start=1):
-        duration = int(issue.get("estimated_days", default_duration))
-        finish = add_days(current_start, duration)
-        issue_order.append(issue["title"])
-        raw_schedule[issue["title"]] = {
+        window = windows[issue["milestone"]]
+        duration = window["duration"]
+        schedule[issue["title"]] = {
             "sequence": index,
-            "duration_days": duration,
-            "start_date": current_start,
-            "activity_end_date": finish,
+            "milestone_sequence": window["sequence"],
+            "duration_value": int(duration["value"]),
+            "duration_unit": duration["unit"],
+            "start_date": window["start_date"],
+            "end_date": window["end_date"],
             "milestone": issue["milestone"],
-        }
-        milestone = issue["milestone"]
-        if milestone not in due_dates or finish > due_dates[milestone]:
-            due_dates[milestone] = finish
-        current_start = finish + timedelta(days=1)
-
-    schedule: dict[str, dict[str, Any]] = {}
-    for title in issue_order:
-        item = raw_schedule[title]
-        schedule[title] = {
-            **item,
-            "end_date": due_dates[item["milestone"]],
         }
 
     return schedule
@@ -116,7 +152,25 @@ def request_json(method: str, url: str, token: str, payload: dict[str, Any] | No
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
+        if exc.code == 404 and "/repos/" in url:
+            parsed = urllib.parse.urlparse(url)
+            parts = parsed.path.strip("/").split("/")
+            if len(parts) >= 3 and parts[0] == "repos":
+                repo_name = "/".join(parts[1:3])
+                raise RuntimeError(
+                    f"Repositorio {repo_name} nao encontrado ou token sem acesso. "
+                    "Confira --owner, --repo e se o GITHUB_TOKEN tem permissao para esse repositorio."
+                ) from exc
         raise RuntimeError(f"HTTP {exc.code} em {method} {url}: {body}") from exc
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise RuntimeError(
+                "Falha ao validar o certificado SSL do GitHub. "
+                "No macOS com Python instalado via python.org, execute "
+                "'/Applications/Python 3.14/Install Certificates.command' "
+                "e tente novamente."
+            ) from exc
+        raise
 
 
 def graphql(token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -205,13 +259,18 @@ def ensure_labels(owner: str, repo: str, token: str, cfg: dict[str, Any], apply:
 def issue_body(issue: dict[str, Any], schedule: dict[str, Any] | None = None) -> str:
     schedule_block = ""
     if schedule:
-        plural = "dia" if schedule["duration_days"] == 1 else "dias"
+        unit_labels = {
+            "days": "dia" if schedule["duration_value"] == 1 else "dias",
+            "months": "mes" if schedule["duration_value"] == 1 else "meses",
+        }
+        unit_label = unit_labels[schedule["duration_unit"]]
         schedule_block = (
             "\n## Planejamento\n"
-            f"- Sequencia: {schedule['sequence']}\n"
+            f"- Sequencia da issue: {schedule['sequence']}\n"
+            f"- Sequencia do milestone: {schedule['milestone_sequence']}\n"
             f"- Inicio estimado: {iso_date(schedule['start_date'])}\n"
             f"- Fim estimado: {iso_date(schedule['end_date'])}\n"
-            f"- Duracao estimada: {schedule['duration_days']} {plural}\n"
+            f"- Duracao estimada do milestone: {schedule['duration_value']} {unit_label}\n"
         )
 
     return (
@@ -244,11 +303,12 @@ def ensure_issues(
         for item in cfg["issues"]:
             schedule = issue_schedule.get(item["title"])
             if schedule:
+                unit_label = "dia(s)" if schedule["duration_unit"] == "days" else "mes(es)"
                 print(
                     "[DRY-RUN] "
                     f"{item['title']}: {iso_date(schedule['start_date'])} "
                     f"-> {iso_date(schedule['end_date'])} "
-                    f"({schedule['duration_days']} dia(s))"
+                    f"({schedule['duration_value']} {unit_label}, milestone {schedule['milestone']})"
                 )
         return titles
 
@@ -259,6 +319,19 @@ def ensure_issues(
     for item in cfg["issues"]:
         if item["title"] in existing:
             print(f"[OK] Issue ja existe: {item['title']}")
+            schedule = issue_schedule.get(item["title"])
+            patch_payload = {
+                "body": issue_body(item, schedule),
+                "labels": item["labels"],
+                "milestone": milestones[item["milestone"]],
+            }
+            request_json(
+                "PATCH",
+                f"{API}/repos/{owner}/{repo}/issues/{existing[item['title']]['number']}",
+                token,
+                patch_payload,
+            )
+            print(f"[OK] Issue atualizada com planejamento: {item['title']}")
             created_titles.append(item["title"])
             continue
 
@@ -275,20 +348,27 @@ def ensure_issues(
     return created_titles
 
 
+def get_owner_type(owner: str, token: str) -> str:
+    data = request_json("GET", f"{API}/users/{owner}", token)
+    owner_type = data.get("type")
+    if owner_type not in {"User", "Organization"}:
+        raise RuntimeError(f"Nao foi possivel resolver o tipo do owner '{owner}'")
+    return owner_type
+
+
 def get_project_owner_id(owner: str, token: str) -> str:
-    query_owner = """
-    query($login: String!) {
-      organization(login: $login) { id }
-      user(login: $login) { id }
-    }
+    owner_type = get_owner_type(owner, token)
+    root_field = "organization" if owner_type == "Organization" else "user"
+    query_owner = f"""
+    query($login: String!) {{
+      {root_field}(login: $login) {{ id }}
+    }}
     """
     data = graphql(token, query_owner, {"login": owner})
-    owner_id = data.get("organization", {}).get("id") if data.get("organization") else None
-    if owner_id is None:
-        owner_id = data.get("user", {}).get("id") if data.get("user") else None
-    if owner_id is None:
-        raise RuntimeError(f"Nao foi possivel resolver owner '{owner}' como organizacao ou usuario")
-    return owner_id
+    owner_data = data.get(root_field)
+    if owner_data is None:
+        raise RuntimeError(f"Nao foi possivel resolver owner '{owner}' como {owner_type}")
+    return owner_data["id"]
 
 
 def get_repository_id(owner: str, repo: str, token: str) -> str:
@@ -321,16 +401,16 @@ def create_project(owner: str, repo: str, token: str, title: str) -> str:
 
 
 def get_project_id(owner: str, token: str, project_number: int) -> str:
-    query = """
-    query($login: String!, $number: Int!) {
-      organization(login: $login) { projectV2(number: $number) { id title } }
-      user(login: $login) { projectV2(number: $number) { id title } }
-    }
+    owner_type = get_owner_type(owner, token)
+    root_field = "organization" if owner_type == "Organization" else "user"
+    query = f"""
+    query($login: String!, $number: Int!) {{
+      {root_field}(login: $login) {{ projectV2(number: $number) {{ id title }} }}
+    }}
     """
     data = graphql(token, query, {"login": owner, "number": project_number})
-    org_p = data.get("organization", {}).get("projectV2") if data.get("organization") else None
-    usr_p = data.get("user", {}).get("projectV2") if data.get("user") else None
-    project = org_p or usr_p
+    owner_data = data.get(root_field)
+    project = owner_data.get("projectV2") if owner_data else None
     if not project:
         raise RuntimeError(f"Project number {project_number} nao encontrado em {owner}")
     print(f"[OK] Project encontrado: {project['title']}")
@@ -351,7 +431,156 @@ def link_project_to_repository(owner: str, repo: str, token: str, project_id: st
     print(f"[OK] Project vinculado ao repositorio: {linked_repo}")
 
 
-def add_issues_to_project(owner: str, repo: str, token: str, project_id: str, titles: list[str], apply: bool) -> None:
+def project_fields(token: str, project_id: str) -> dict[str, dict[str, str]]:
+    query = """
+    query($projectId: ID!) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              ... on ProjectV2Field { id name dataType }
+              ... on ProjectV2IterationField { id name dataType }
+              ... on ProjectV2SingleSelectField { id name dataType }
+            }
+          }
+        }
+      }
+    }
+    """
+    data = graphql(token, query, {"projectId": project_id})
+    fields = data["node"]["fields"]["nodes"]
+    return {field["name"]: field for field in fields if field}
+
+
+def create_project_date_field(token: str, project_id: str, name: str) -> str:
+    mutation = """
+    mutation($projectId: ID!, $name: String!) {
+      createProjectV2Field(input: {projectId: $projectId, dataType: DATE, name: $name}) {
+        projectV2Field {
+          ... on ProjectV2Field { id name dataType }
+        }
+      }
+    }
+    """
+    data = graphql(token, mutation, {"projectId": project_id, "name": name})
+    field = data["createProjectV2Field"]["projectV2Field"]
+    print(f"[NEW] Campo de data criado no Project: {field['name']}")
+    return field["id"]
+
+
+def ensure_project_date_field(token: str, project_id: str, name: str) -> str:
+    field = project_fields(token, project_id).get(name)
+    if field:
+        if field["dataType"] != "DATE":
+            raise RuntimeError(f"Campo '{name}' ja existe no Project, mas nao e do tipo DATE")
+        print(f"[OK] Campo de data ja existe no Project: {name}")
+        return field["id"]
+    return create_project_date_field(token, project_id, name)
+
+
+def project_item_ids_by_issue_title(token: str, project_id: str) -> dict[str, str]:
+    query = """
+    query($projectId: ID!) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          items(first: 100) {
+            nodes {
+              id
+              content {
+                ... on Issue { title }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    data = graphql(token, query, {"projectId": project_id})
+    items = data["node"]["items"]["nodes"]
+    return {
+        item["content"]["title"]: item["id"]
+        for item in items
+        if item.get("content") and item["content"].get("title")
+    }
+
+
+def update_project_item_date(token: str, project_id: str, item_id: str, field_id: str, value: date) -> None:
+    mutation = """
+    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: Date!) {
+      updateProjectV2ItemFieldValue(
+        input: {
+          projectId: $projectId
+          itemId: $itemId
+          fieldId: $fieldId
+          value: {date: $value}
+        }
+      ) {
+        projectV2Item { id }
+      }
+    }
+    """
+    graphql(
+        token,
+        mutation,
+        {
+            "projectId": project_id,
+            "itemId": item_id,
+            "fieldId": field_id,
+            "value": iso_date(value),
+        },
+    )
+
+
+def update_project_dates(
+    token: str,
+    project_id: str,
+    cfg: dict[str, Any],
+    titles: list[str],
+    issue_schedule: dict[str, dict[str, Any]],
+) -> None:
+    date_fields = cfg.get("schedule", {}).get("project_date_fields", {})
+    start_field_name = date_fields.get("start", "Inicio previsto")
+    end_field_name = date_fields.get("end", "Fim previsto")
+    start_field_id = ensure_project_date_field(token, project_id, start_field_name)
+    end_field_id = ensure_project_date_field(token, project_id, end_field_name)
+    item_ids = project_item_ids_by_issue_title(token, project_id)
+
+    for title in titles:
+        item_id = item_ids.get(title)
+        schedule = issue_schedule.get(title)
+        if not item_id or not schedule:
+            print(f"[WARN] Item do Project sem datas atualizadas: {title}")
+            continue
+        update_project_item_date(
+            token,
+            project_id,
+            item_id,
+            start_field_id,
+            schedule["start_date"],
+        )
+        update_project_item_date(
+            token,
+            project_id,
+            item_id,
+            end_field_id,
+            schedule["end_date"],
+        )
+        print(
+            "[OK] Datas atualizadas no Project: "
+            f"{title} ({iso_date(schedule['start_date'])} -> {iso_date(schedule['end_date'])})"
+        )
+
+
+def add_issues_to_project(
+    owner: str,
+    repo: str,
+    token: str,
+    project_id: str,
+    cfg: dict[str, Any],
+    titles: list[str],
+    apply: bool,
+    issue_schedule: dict[str, dict[str, Any]],
+) -> None:
     if not apply:
         print(f"[DRY-RUN] Adicionaria {len(titles)} issues ao project {project_id}")
         return
@@ -372,8 +601,15 @@ def add_issues_to_project(owner: str, repo: str, token: str, project_id: str, ti
         if not issue:
             print(f"[WARN] Issue nao encontrada para adicionar no project: {title}")
             continue
-        graphql(token, mutation, {"projectId": project_id, "contentId": issue["node_id"]})
-        print(f"[OK] Issue adicionada ao project: {title}")
+        try:
+            graphql(token, mutation, {"projectId": project_id, "contentId": issue["node_id"]})
+            print(f"[OK] Issue adicionada ao project: {title}")
+        except RuntimeError as exc:
+            if "already" not in str(exc).lower() and "existe" not in str(exc).lower():
+                raise
+            print(f"[OK] Issue ja estava no project: {title}")
+
+    update_project_dates(token, project_id, cfg, titles, issue_schedule)
 
 
 def parse_args() -> argparse.Namespace:
@@ -421,11 +657,24 @@ def main() -> int:
             else:
                 project_id = get_project_id(args.owner, token, args.project_number)
                 link_project_to_repository(args.owner, args.repo, token, project_id)
-            add_issues_to_project(args.owner, args.repo, token, project_id, titles, args.apply)
+            add_issues_to_project(
+                args.owner,
+                args.repo,
+                token,
+                project_id,
+                cfg,
+                titles,
+                args.apply,
+                issue_schedule,
+            )
 
     print("Concluido.")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except RuntimeError as exc:
+        print(f"ERRO: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
