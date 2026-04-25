@@ -275,10 +275,10 @@ def ensure_issues(
     return created_titles
 
 
-def create_project(owner: str, token: str, title: str) -> str:
+def get_project_owner_id(owner: str, token: str) -> str:
     query_owner = """
     query($login: String!) {
-    #   organization(login: $login) { id }
+      organization(login: $login) { id }
       user(login: $login) { id }
     }
     """
@@ -288,7 +288,24 @@ def create_project(owner: str, token: str, title: str) -> str:
         owner_id = data.get("user", {}).get("id") if data.get("user") else None
     if owner_id is None:
         raise RuntimeError(f"Nao foi possivel resolver owner '{owner}' como organizacao ou usuario")
+    return owner_id
 
+
+def get_repository_id(owner: str, repo: str, token: str) -> str:
+    query = """
+    query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) { id }
+    }
+    """
+    data = graphql(token, query, {"owner": owner, "repo": repo})
+    repository = data.get("repository")
+    if repository is None:
+        raise RuntimeError(f"Repositorio {owner}/{repo} nao encontrado")
+    return repository["id"]
+
+
+def create_project(owner: str, repo: str, token: str, title: str) -> str:
+    owner_id = get_project_owner_id(owner, token)
     mutation = """
     mutation($ownerId: ID!, $title: String!) {
       createProjectV2(input: {ownerId: $ownerId, title: $title}) {
@@ -299,6 +316,7 @@ def create_project(owner: str, token: str, title: str) -> str:
     out = graphql(token, mutation, {"ownerId": owner_id, "title": title})
     p = out["createProjectV2"]["projectV2"]
     print(f"[NEW] Project criado: {p['title']} (number={p['number']})")
+    link_project_to_repository(owner, repo, token, p["id"])
     return p["id"]
 
 
@@ -317,6 +335,20 @@ def get_project_id(owner: str, token: str, project_number: int) -> str:
         raise RuntimeError(f"Project number {project_number} nao encontrado em {owner}")
     print(f"[OK] Project encontrado: {project['title']}")
     return project["id"]
+
+
+def link_project_to_repository(owner: str, repo: str, token: str, project_id: str) -> None:
+    repository_id = get_repository_id(owner, repo, token)
+    mutation = """
+    mutation($projectId: ID!, $repositoryId: ID!) {
+      linkProjectV2ToRepository(input: {projectId: $projectId, repositoryId: $repositoryId}) {
+        repository { nameWithOwner }
+      }
+    }
+    """
+    out = graphql(token, mutation, {"projectId": project_id, "repositoryId": repository_id})
+    linked_repo = out["linkProjectV2ToRepository"]["repository"]["nameWithOwner"]
+    print(f"[OK] Project vinculado ao repositorio: {linked_repo}")
 
 
 def add_issues_to_project(owner: str, repo: str, token: str, project_id: str, titles: list[str], apply: bool) -> None:
@@ -346,7 +378,7 @@ def add_issues_to_project(owner: str, repo: str, token: str, project_id: str, ti
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bootstrap de milestones/issues/project no GitHub")
-    parser.add_argument("--owner", required=True, help="Owner da organizacao ou usuario")
+    parser.add_argument("--owner", required=True, help="Owner do repositorio (organizacao ou usuario)")
     parser.add_argument("--repo", required=True, help="Nome do repositorio")
     parser.add_argument("--config", default="backlog_github_project.json", help="Arquivo JSON de configuracao")
     parser.add_argument("--apply", action="store_true", help="Executa alteracoes no GitHub")
@@ -385,9 +417,10 @@ def main() -> int:
             print("[DRY-RUN] Criaria/encontraria project e adicionaria issues.")
         else:
             if args.create_project:
-                project_id = create_project(args.owner, token, args.project_title)
+                project_id = create_project(args.owner, args.repo, token, args.project_title)
             else:
                 project_id = get_project_id(args.owner, token, args.project_number)
+                link_project_to_repository(args.owner, args.repo, token, project_id)
             add_issues_to_project(args.owner, args.repo, token, project_id, titles, args.apply)
 
     print("Concluido.")
