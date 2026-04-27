@@ -51,6 +51,15 @@ def require_list(value: Any, name: str, errors: list[str]) -> list[Any]:
     return value
 
 
+def validate_string_list(value: Any, name: str, errors: list[str]) -> None:
+    if not isinstance(value, list) or not value:
+        errors.append(f"`{name}` deve ser uma lista nao vazia")
+        return
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"`{name}[{idx}]` deve ser um texto nao vazio")
+
+
 def duplicate_values(values: list[str]) -> list[str]:
     seen: set[str] = set()
     duplicates: set[str] = set()
@@ -209,6 +218,13 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
         for label_name in issue_labels:
             if label_name not in label_name_set:
                 errors.append(f"`issues[{index}]` referencia label inexistente: {label_name}")
+
+        entregaveis = issue.get("entregaveis")
+        criterios_aceite = issue.get("criterios_aceite")
+        if entregaveis is not None:
+            validate_string_list(entregaveis, f"issues[{index}].entregaveis", errors)
+        if criterios_aceite is not None:
+            validate_string_list(criterios_aceite, f"issues[{index}].criterios_aceite", errors)
 
     for title in duplicate_values(issue_titles):
         errors.append(f"Issue duplicada: {title}")
@@ -415,17 +431,25 @@ def issue_body(issue: dict[str, Any], schedule: dict[str, Any] | None = None) ->
             f"- Duracao estimada do milestone: {schedule['duration_value']} {unit_label}\n"
         )
 
+    objetivo = issue.get("description", "Executar esta atividade conforme o processo da Fabrica de IA.")
+
+    entregaveis = issue.get("entregaveis", ["Evidencia principal anexada", "Criterios de aceite validados"])
+    criterios_aceite = issue.get(
+        "criterios_aceite",
+        ["Resultado revisado com stakeholders", "Registro no Project atualizado"],
+    )
+    entregaveis_block = "\n".join(f"- [ ] {item}" for item in entregaveis)
+    criterios_block = "\n".join(f"- [ ] {item}" for item in criterios_aceite)
+
     return (
         "## Contexto\n"
         f"Fase/marco: **{issue['milestone']}**.\n\n"
         "## Objetivo\n"
-        "Executar esta atividade conforme o processo da Fabrica de IA.\n\n"
+        f"{objetivo}\n\n"
         "## Entregaveis\n"
-        "- [ ] Evidencia principal anexada\n"
-        "- [ ] Criterios de aceite validados\n\n"
+        f"{entregaveis_block}\n\n"
         "## Criterios de aceite\n"
-        "- [ ] Resultado revisado com stakeholders\n"
-        "- [ ] Registro no Project atualizado\n"
+        f"{criterios_block}\n"
         f"{schedule_block}"
     )
 
